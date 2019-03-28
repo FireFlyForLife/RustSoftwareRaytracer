@@ -1,0 +1,9 @@
+[package]
+name = "ray_tracer"
+version = "0.1.0"
+authors = ["FireFlyForLife <maiko.s.99@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+cgmath = "0.17.0"
+sdl2 = "0.32"
