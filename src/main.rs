@@ -1,8 +1,10 @@
 #![feature(duration_float)]
 
+mod geometry;
 
-//use cgmath::prelude::*;
+use cgmath::prelude::*;
 
+use cgmath::Vector3;
 use sdl2::rect::{Point, Rect};
 use sdl2::pixels::Color;
 use sdl2::event::Event;
@@ -14,19 +16,92 @@ use sdl2::render::{Canvas, Texture, TextureCreator};
 use std::time::Duration;
 use std::time::Instant;
 
+type Vec3 = Vector3<f32>;
 
-fn draw(pixels: &mut [u8], buffer: &mut [u8], width: u32, height: u32)
-{
-    for y in 0..height {
-        for x in 0..width {
-            buffer[((y*width + x)*4) as usize] = ((x) % 255) as u8;
-            buffer[((y*width + x)*4+1) as usize] = ((y) % 255) as u8;
-            buffer[((y*width + x)*4+2) as usize] = ((x+y) % 255) as u8;
-            buffer[((y*width + x)*4+3) as usize] = 255;
-        }
+#[derive(Debug)]
+struct Ray {
+    origin: Vec3,
+    direction: Vec3,
+}
+
+impl Ray {
+    fn new(origin: Vec3, direction: Vec3) -> Ray {
+        Ray{ origin, direction}
     }
 
-    pixels.copy_from_slice(buffer);
+    fn point_at_parameter(&self, t: f32) -> Vec3 {
+        self.origin + t * self.direction
+    }
+}
+
+impl Default for Ray {
+    fn default() -> Self {
+        Ray{origin: Vec3::new(0.0, 0.0, 0.0), direction: Vec3::new(0.0, 0.0, 0.0)}
+    }
+}
+
+// Create a RGBA color value from a 3 component vector, and fill make the alpha channel 255
+fn vec3_to_rgba(vec: Vec3) -> Color {
+    Color::RGBA((vec.x * 255.) as u8, (vec.y * 255.) as u8, (vec.z * 255.) as u8, 255)
+}
+
+
+fn background_color(ray: &Ray) -> Color {
+    let normalized_dir = ray.direction.normalize();
+    let t = 0.5*(normalized_dir.y + 1.0);
+    let color = (1.0-t)*Vec3::new(1.0, 1.0, 1.0) + t*Vec3::new(0.5, 0.7, 1.0);
+    
+    vec3_to_rgba(color)
+}
+
+fn ray_to_sphere(ray: &Ray, sphere_center: &Vec3, sphere_radius: f32) -> f32 {
+    let oc = ray.origin - sphere_center;
+    let a = ray.direction.dot(ray.direction);
+    let b = 2.0 * oc.dot(ray.direction);
+    let c = oc.dot(oc) - sphere_radius*sphere_radius;
+    let discriminant = b*b - 4.0*a*c;
+    
+    if discriminant < 0.0 {
+        return -1.0;
+    } else {
+        return (-b - discriminant.sqrt()) / (2.0 * a);
+    }
+}
+
+fn trace_ray(ray: &Ray) -> Color {
+    let t = ray_to_sphere(ray, &Vec3::new(0.0, 0.0, -1.0), 0.5);
+    if t > 0.0 {
+        let n = (ray.point_at_parameter(t) - Vec3::new(0.0, 0.0, -1.0)).normalize();
+        let vec_color = 0.5*Vec3::new(n.x+1., n.y+1., n.z+1.);
+        return vec3_to_rgba(vec_color);
+    }
+
+    background_color(ray)
+}
+
+fn draw(pixels: &mut [u8], buffer: &mut [u8], width: u32, height: u32) {
+    let aspect_ratio = width as f32 / height as f32;
+    let lower_left_corner = Vec3::new(-1.0 * aspect_ratio, -1.0, -1.0);
+    let horizontal = Vec3::new(2.0, 0.0, 0.0) * aspect_ratio;
+    let vertical = Vec3::new(0.0, 2.0, 0.0);
+
+    let origin = Vec3::new(0.0, 0.0, 0.0);
+
+    for y in 0..height {
+        for x in 0..width {
+            let u = (x as f32) / (width as f32);
+            let v = 1.0 - (y as f32) / (height as f32);
+            let ray = Ray::new(origin, lower_left_corner + u*horizontal + v*vertical);
+
+            let color = trace_ray(&ray);
+
+            let pixelOffset = ((y*width + x)*4) as usize;
+            pixels[pixelOffset  ] = color.b;
+            pixels[pixelOffset+1] = color.g;
+            pixels[pixelOffset+2] = color.r;
+            pixels[pixelOffset+3] = color.a;
+        }
+    }
 }
 
 fn main() -> Result<(), String>{
