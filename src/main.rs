@@ -18,6 +18,8 @@ use sdl2::pixels::Color;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 
+use rand::prelude::*;
+
 // use sdl2::rect::{Point, Rect};
 // use sdl2::surface::Surface;
 // use sdl2::mouse::MouseButton;
@@ -77,8 +79,8 @@ impl Raytracer {
             for x in 0..self.width {
                 let mut total_color = Vec3::new(0.0, 0.0, 0.0);
                 for _sample in 0..SAMPLES_PER_PIXEL {
-                    let u = (x as f32) / (self.width as f32);
-                    let v = 1.0 - (y as f32) / (self.height as f32);
+                    let u = ((x as f32) + rand::random::<f32>()) / (self.width as f32);
+                    let v = 1.0 - ((y as f32) + rand::random::<f32>()) / (self.height as f32);
                     let ray = Ray::new(origin, lower_left_corner + u*horizontal + v*vertical);
 
                     let color = self.trace_ray(&ray);
