@@ -26,6 +26,12 @@ use sdl2::keyboard::Keycode;
 // use std::time::Duration;
 use std::time::Instant;
 use std::vec::Vec;
+use std::ptr;
+use std::mem;
+
+const SAMPLES_PER_PIXEL: u32 = 32;
+const WINDOW_WIDTH: u32 = 1280;
+const WINDOW_HEIGHT: u32 = 720;
 
 #[derive(Default)]
 struct World {
@@ -63,36 +69,66 @@ impl Raytracer {
         let horizontal = Vec3::new(2.0, 0.0, 0.0) * aspect_ratio;
         let vertical = Vec3::new(0.0, 2.0, 0.0);
 
+        let pixels_color_ptr: *mut Color = unsafe{ mem::transmute( &pixels[0] ) };
+
         let origin = Vec3::new(0.0, 0.0, 0.0);
 
         for y in 0..self.height {
             for x in 0..self.width {
                 let mut total_color = Vec3::new(0.0, 0.0, 0.0);
-                const SAMPLES: u32 = 100;
-                for _s in 0..SAMPLES {
+                for _sample in 0..SAMPLES_PER_PIXEL {
                     let u = (x as f32) / (self.width as f32);
                     let v = 1.0 - (y as f32) / (self.height as f32);
                     let ray = Ray::new(origin, lower_left_corner + u*horizontal + v*vertical);
 
-                    total_color += color_to_vec3(self.trace_ray(&ray));
+                    let color = self.trace_ray(&ray);
+
+                    total_color += color_to_vec3(color);
                 }
                 
-                let color = vec3_to_color(total_color / SAMPLES as f32);
-                let pixelOffset = ((y*self.width + x)*4) as usize;
-                pixels[pixelOffset  ] = color.b;
-                pixels[pixelOffset+1] = color.g;
-                pixels[pixelOffset+2] = color.r;
-                pixels[pixelOffset+3] = color.a;
+                let color = vec3_to_color(total_color / (SAMPLES_PER_PIXEL as f32));
+                let fixed_color = Color{r: color.b, g: color.g, b: color.r, a: color.a};
+                // let pixelOffset = ((y*self.width + x)*4) as usize;
+                unsafe{
+                    ptr::write::<Color>(pixels_color_ptr.offset((y * self.width + x) as isize), fixed_color);
+                }
+                // pixels[pixelOffset  ] = color.b;
+                // pixels[pixelOffset+1] = color.g;
+                // pixels[pixelOffset+2] = color.r;
+                // pixels[pixelOffset+3] = color.a;
             }
         }
     }
 
     pub fn trace_ray(&self, ray: &Ray) -> Color {
-        let t = ray_to_sphere(ray, &Vec3::new(0.0, 0.0, -1.0), 0.5);
-        if t > 0.0 {
-            let n = (ray.point_at_parameter(t) - Vec3::new(0.0, 0.0, -1.0)).normalize();
-            let vec_color = 0.5*Vec3::new(n.x+1., n.y+1., n.z+1.);
-            return vec3_to_color(vec_color);
+        let mut closest_hit: Option<&Shape> = None;
+        let mut t: f32 = 100000.0;
+        for object in &self.world.objects {
+            match &object.shape {
+                Shape::Sphere(sphere) => {
+                    let this_t = ray_to_sphere(ray, &sphere.center, sphere.radius);
+                    if this_t > 0.0 && this_t < t {
+                        t = this_t;
+                        closest_hit = Some(&object.shape);
+                    }
+                },
+                Shape::Mesh(mesh) => {},
+                _ => {},
+            }
+        }
+        
+        if t > 0.0 && closest_hit.is_some() {
+            match closest_hit.unwrap() {
+                Shape::Sphere(sphere) => {
+                    let n = (ray.point_at_parameter(t) - sphere.center).normalize();
+                    let vec_color = 0.5*Vec3::new(n.x+1., n.y+1., n.z+1.);
+                    return vec3_to_color(vec_color);
+                },
+                Shape::Mesh(mesh) => {
+
+                }
+            }
+
         }
 
         background_color(ray)
@@ -126,7 +162,9 @@ fn ray_to_sphere(ray: &Ray, sphere_center: &Vec3, sphere_radius: f32) -> f32 {
 fn main() -> Result<(), String>{
     println!("Hello, world!");
 
-    let raytracer = Raytracer::new(1280, 720);
+    let mut raytracer = Raytracer::new(WINDOW_WIDTH, WINDOW_HEIGHT);
+    raytracer.world.objects.push(Object{material: Material{}, shape: Shape::Sphere(Sphere{center: Vec3::new(0.0, 0.0, -1.0), radius: 0.5})});
+    raytracer.world.objects.push(Object{material: Material{}, shape: Shape::Sphere(Sphere{center: Vec3::new(0.0, -100.5, -1.0), radius: 100.0})});
 
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
@@ -183,7 +221,9 @@ fn main() -> Result<(), String>{
         }
 
         //surface.update_window().expect("Update didn't properly work");
+        let present_time_start = Instant::now();
         surface.finish().expect("Updating the screen surface failed!");
+        println!("frame {} present time: {} sec", frame, present_time_start.elapsed().as_float_secs());
         println!("frame {} render+present time: {} sec", frame, start_render_time.elapsed().as_float_secs());
 
         let frame_time = frame_start_time.elapsed().as_float_secs();
