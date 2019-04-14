@@ -35,6 +35,22 @@ const SAMPLES_PER_PIXEL: u32 = 32;
 const WINDOW_WIDTH: u32 = 1280;
 const WINDOW_HEIGHT: u32 = 720;
 
+
+fn random_in_unit_sphere() -> Vec3 {
+    let mut p = Vec3::new(0.0, 0.0, 0.0);
+    while {
+        p = 2.0*Vec3::new(rand::random(), rand::random(), rand::random()) - Vec3::new(1.0, 1.0, 1.0);
+        p.magnitude2() >= 1.0
+    }{}
+    return p;
+}
+
+struct HitRecord {
+    t: f32,
+    point: Vec3,
+    normal: Vec3,
+}
+
 #[derive(Default)]
 struct World {
     objects: Vec<Object>
