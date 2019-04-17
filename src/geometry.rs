@@ -1,7 +1,16 @@
 use cgmath::Vector3;
 
-pub struct Material {
+pub struct DiffuseMaterial {
 
+}
+
+pub struct MetalicMaterial {
+
+}
+
+pub enum Material {
+    Diffuse(DiffuseMaterial),
+    Metalic(MetalicMaterial),
 }
 
 pub struct Sphere {
@@ -10,9 +19,11 @@ pub struct Sphere {
     // Size: 3*4+1*4 = 16 bytes
 }
 
+#[allow(dead_code)]
 struct AABB {
     pub top_left: Vector3<f32>,
     pub extend: Vector3<f32>,
+    //Size: 6*4 = 24 bytes
 }
 
 pub struct Polygon {

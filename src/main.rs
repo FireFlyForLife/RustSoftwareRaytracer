@@ -1,12 +1,10 @@
 #![feature(duration_float)]
-#![feature(uniform_paths)]
 
 mod geometry;
 mod math_extensions;
 mod ray;
 mod camera;
 
-use sdl2::EventPump;
 use math_extensions::*;
 use ray::Ray;
 use geometry::*;
@@ -18,26 +16,20 @@ use sdl2::pixels::Color;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 
-use rand::prelude::*;
-
-// use sdl2::rect::{Point, Rect};
-// use sdl2::surface::Surface;
-// use sdl2::mouse::MouseButton;
-// use sdl2::video::{Window, WindowContext};
-// use sdl2::render::{Canvas, Texture, TextureCreator};
-// use std::time::Duration;
 use std::time::Instant;
 use std::vec::Vec;
 use std::ptr;
 use std::mem;
 
 const SAMPLES_PER_PIXEL: u32 = 32;
-const WINDOW_WIDTH: u32 = 1280;
-const WINDOW_HEIGHT: u32 = 720;
+const WINDOW_WIDTH: u32 = 640; //1280;
+const WINDOW_HEIGHT: u32 = 480; //720;
+
+const USE_GAMMA_CORRECTION: bool = false;
 
 
 fn random_in_unit_sphere() -> Vec3 {
-    let mut p = Vec3::new(0.0, 0.0, 0.0);
+    let mut p;
     while {
         p = 2.0*Vec3::new(rand::random(), rand::random(), rand::random()) - Vec3::new(1.0, 1.0, 1.0);
         p.magnitude2() >= 1.0
@@ -45,10 +37,20 @@ fn random_in_unit_sphere() -> Vec3 {
     return p;
 }
 
+fn reflect(direction: Vec3, surface_normal: Vec3) -> Vec3 {
+    return surface_normal - 2.0*direction.dot(surface_normal)*surface_normal;
+}
+
 struct HitRecord {
     t: f32,
     point: Vec3,
     normal: Vec3,
+}
+
+impl Default for HitRecord {
+    fn default() -> Self {
+        HitRecord{t: std::f32::MAX, point: Vec3::new(0.0, 0.0, 0.0), normal: Vec3::new(0.0, 0.0, 0.0)}
+    }
 }
 
 #[derive(Default)]
@@ -104,7 +106,15 @@ impl Raytracer {
                     total_color += color_to_vec3(color);
                 }
                 
-                let color = vec3_to_color(total_color / (SAMPLES_PER_PIXEL as f32));
+                let vec3_color = total_color / (SAMPLES_PER_PIXEL as f32);
+                let color;
+                if USE_GAMMA_CORRECTION {
+                    let vec3_color_gamma_corrected = Vec3::new(vec3_color.x.sqrt(), vec3_color.y.sqrt(), vec3_color.z.sqrt());
+                    color = vec3_to_color(vec3_color_gamma_corrected);
+                } else {
+                   color = vec3_to_color(vec3_color);
+                }
+                
                 let fixed_color = Color{r: color.b, g: color.g, b: color.r, a: color.a};
                 // let pixelOffset = ((y*self.width + x)*4) as usize;
                 unsafe{
@@ -119,37 +129,34 @@ impl Raytracer {
     }
 
     pub fn trace_ray(&self, ray: &Ray) -> Color {
-        let mut closest_hit: Option<&Shape> = None;
-        let mut t: f32 = 100000.0;
+        let mut hit_record: HitRecord = Default::default();
+
+        if self.intersect_world(ray, 0.001, std::f32::MAX, &mut hit_record) {
+            let target = hit_record.point + hit_record.normal + random_in_unit_sphere();
+            return vec3_to_color(0.5 * color_to_vec3(self.trace_ray( &Ray::new(hit_record.point, target - hit_record.point))));
+        } else {
+            return background_color(ray);
+        }
+    }
+
+    pub fn intersect_world(&self, ray: &Ray, min_dist: f32, max_dist: f32, hit_record: &mut HitRecord) -> bool {
+        let mut intersected_anything = false;
+        let mut closest_hit = max_dist;
+
         for object in &self.world.objects {
             match &object.shape {
                 Shape::Sphere(sphere) => {
-                    let this_t = ray_to_sphere(ray, &sphere.center, sphere.radius);
-                    if this_t > 0.0 && this_t < t {
-                        t = this_t;
-                        closest_hit = Some(&object.shape);
+                    if ray_to_sphere(ray, &sphere, min_dist, closest_hit, hit_record) {
+                        closest_hit = hit_record.t;
+
+                        intersected_anything = true;
                     }
                 },
-                Shape::Mesh(mesh) => {},
-                _ => {},
+                Shape::Mesh(_mesh) => {},
             }
         }
-        
-        if t > 0.0 && closest_hit.is_some() {
-            match closest_hit.unwrap() {
-                Shape::Sphere(sphere) => {
-                    let n = (ray.point_at_parameter(t) - sphere.center).normalize();
-                    let vec_color = 0.5*Vec3::new(n.x+1., n.y+1., n.z+1.);
-                    return vec3_to_color(vec_color);
-                },
-                Shape::Mesh(mesh) => {
 
-                }
-            }
-
-        }
-
-        background_color(ray)
+        return intersected_anything;
     }
 }
 
@@ -162,18 +169,36 @@ fn background_color(ray: &Ray) -> Color {
     vec3_to_color(color)
 }
 
-fn ray_to_sphere(ray: &Ray, sphere_center: &Vec3, sphere_radius: f32) -> f32 {
+fn ray_to_sphere(ray: &Ray, sphere: &Sphere, t_min: f32, t_max: f32, hit_record: &mut HitRecord) -> bool {
+    let sphere_center = sphere.center;
+    let sphere_radius = sphere.radius;
+
     let oc = ray.origin - sphere_center;
     let a = ray.direction.dot(ray.direction);
-    let b = 2.0 * oc.dot(ray.direction);
+    let b = oc.dot(ray.direction);
     let c = oc.dot(oc) - sphere_radius*sphere_radius;
-    let discriminant = b*b - 4.0*a*c;
+    let discriminant = b*b - a*c;
     
-    if discriminant < 0.0 {
-        return -1.0;
-    } else {
-        return (-b - discriminant.sqrt()) / (2.0 * a);
+    if discriminant > 0.0 {
+        let mut temp = (-b - discriminant.sqrt()) / a;
+        if temp < t_max && temp > t_min {
+            hit_record.t = temp;
+            hit_record.point = ray.point_at_parameter(temp);
+            hit_record.normal = (hit_record.point - sphere_center) / sphere_radius;
+
+            return true;
+        }
+        temp = (-b + discriminant.sqrt()) / a;
+        if temp < t_max && temp > t_min {
+            hit_record.t = temp;
+            hit_record.point = ray.point_at_parameter(temp);
+            hit_record.normal = (hit_record.point - sphere_center) / sphere_radius;
+
+            return true;
+        }
     }
+
+    return false;
 }
 
 
@@ -181,8 +206,8 @@ fn main() -> Result<(), String>{
     println!("Hello, world!");
 
     let mut raytracer = Raytracer::new(WINDOW_WIDTH, WINDOW_HEIGHT);
-    raytracer.world.objects.push(Object{material: Material{}, shape: Shape::Sphere(Sphere{center: Vec3::new(0.0, 0.0, -1.0), radius: 0.5})});
-    raytracer.world.objects.push(Object{material: Material{}, shape: Shape::Sphere(Sphere{center: Vec3::new(0.0, -100.5, -1.0), radius: 100.0})});
+    raytracer.world.objects.push(Object{material: Material::Diffuse(DiffuseMaterial{}), shape: Shape::Sphere(Sphere{center: Vec3::new(0.0, 0.0, -1.0), radius: 0.5})});
+    raytracer.world.objects.push(Object{material: Material::Diffuse(DiffuseMaterial{}), shape: Shape::Sphere(Sphere{center: Vec3::new(0.0, -100.5, -1.0), radius: 100.0})});
 
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
@@ -223,7 +248,7 @@ fn main() -> Result<(), String>{
                 }
             }
         }
-        println!("frame {} event loop took: {} sec", frame, frame_start_time.elapsed().as_float_secs());
+        println!("frame {} event loop took: {} sec", frame, frame_start_time.elapsed().as_secs_f64());
         
         let start_render_time = Instant::now();
 
@@ -232,19 +257,18 @@ fn main() -> Result<(), String>{
 
         if !surface.must_lock() {
             let pixels = surface.without_lock_mut().unwrap();
-
             let drawing_start_time = Instant::now();
             raytracer.draw_frame(pixels);
-            println!("frame {} raycast drawing time: {} sec", frame, drawing_start_time.elapsed().as_float_secs());
+            println!("frame {} raycast drawing time: {} sec", frame, drawing_start_time.elapsed().as_secs_f64());
         }
 
-        //surface.update_window().expect("Update didn't properly work");
         let present_time_start = Instant::now();
         surface.finish().expect("Updating the screen surface failed!");
-        println!("frame {} present time: {} sec", frame, present_time_start.elapsed().as_float_secs());
-        println!("frame {} render+present time: {} sec", frame, start_render_time.elapsed().as_float_secs());
+        println!("frame {} present time: {} sec", frame, present_time_start.elapsed().as_secs_f64());
 
-        let frame_time = frame_start_time.elapsed().as_float_secs();
+        println!("frame {} render+present time: {} sec", frame, start_render_time.elapsed().as_secs_f64());
+
+        let frame_time = frame_start_time.elapsed().as_secs_f64();
         println!("frame {} total time: {} sec. FPS={}", frame, frame_time, 1.0f64/frame_time);
 
         frame += 1;
