@@ -22,6 +22,7 @@ use std::ptr;
 use std::mem;
 
 const SAMPLES_PER_PIXEL: u32 = 32;
+const MAX_RAY_RECURSION_DEPTH: u32 = 50;
 const WINDOW_WIDTH: u32 = 640; //1280;
 const WINDOW_HEIGHT: u32 = 480; //720;
 
@@ -30,9 +31,9 @@ const USE_GAMMA_CORRECTION: bool = false;
 
 fn random_in_unit_sphere() -> Vec3 {
     let mut p;
-    while {
+    /*DO*/ while {
         p = 2.0*Vec3::new(rand::random(), rand::random(), rand::random()) - Vec3::new(1.0, 1.0, 1.0);
-        p.magnitude2() >= 1.0
+    /*WHILE*/ p.magnitude2() >= 1.0
     }{}
     return p;
 }
@@ -41,34 +42,25 @@ fn reflect(direction: Vec3, surface_normal: Vec3) -> Vec3 {
     return surface_normal - 2.0*direction.dot(surface_normal)*surface_normal;
 }
 
-struct HitRecord {
+struct HitRecord<'a> {
     t: f32,
     point: Vec3,
     normal: Vec3,
+    material: Option<&'a Material>,
 }
 
-impl Default for HitRecord {
+impl<'a> Default for HitRecord<'a> {
     fn default() -> Self {
-        HitRecord{t: std::f32::MAX, point: Vec3::new(0.0, 0.0, 0.0), normal: Vec3::new(0.0, 0.0, 0.0)}
+        HitRecord{t: std::f32::MAX, point: Vec3::new(0.0, 0.0, 0.0), normal: Vec3::new(0.0, 0.0, 0.0), material: None}
     }
 }
 
-#[derive(Default)]
-struct World {
-    objects: Vec<Object>
-}
-
 struct Raytracer {
-    world: World,
+    world: Vec<Object>,
 
     width: u32,
     height: u32,
     aspect_ratio: f32,
-
-    // sdl_context: Sdl,
-    // video_subsystem: VideoSubsystem,
-    // event_pump: EventPump,
-    // window: Window,
 }
 
 impl Raytracer {
@@ -76,7 +68,7 @@ impl Raytracer {
         let aspect_ratio = width as f32 / height as f32;
 
         Raytracer{ 
-            world: Default::default(), 
+            world: Vec::new(), 
             width: width, 
             height: height, 
             aspect_ratio: aspect_ratio
@@ -101,7 +93,7 @@ impl Raytracer {
                     let v = 1.0 - ((y as f32) + rand::random::<f32>()) / (self.height as f32);
                     let ray = Ray::new(origin, lower_left_corner + u*horizontal + v*vertical);
 
-                    let color = self.trace_ray(&ray);
+                    let color = self.trace_ray(&ray, 0);
 
                     total_color += color_to_vec3(color);
                 }
@@ -116,38 +108,42 @@ impl Raytracer {
                 }
                 
                 let fixed_color = Color{r: color.b, g: color.g, b: color.r, a: color.a};
-                // let pixelOffset = ((y*self.width + x)*4) as usize;
                 unsafe{
                     ptr::write::<Color>(pixels_color_ptr.offset((y * self.width + x) as isize), fixed_color);
                 }
-                // pixels[pixelOffset  ] = color.b;
-                // pixels[pixelOffset+1] = color.g;
-                // pixels[pixelOffset+2] = color.r;
-                // pixels[pixelOffset+3] = color.a;
             }
         }
     }
 
-    pub fn trace_ray(&self, ray: &Ray) -> Color {
+    pub fn trace_ray(&self, ray: &Ray, recursion_depth: u32) -> Color {
         let mut hit_record: HitRecord = Default::default();
 
         if self.intersect_world(ray, 0.001, std::f32::MAX, &mut hit_record) {
-            let target = hit_record.point + hit_record.normal + random_in_unit_sphere();
-            return vec3_to_color(0.5 * color_to_vec3(self.trace_ray( &Ray::new(hit_record.point, target - hit_record.point))));
+            let scattered: Ray;
+            let attenuation: Vec3;
+
+            let option = scatter_from_material(ray, hit_record.material.unwrap(), &hit_record);
+            if recursion_depth < MAX_RAY_RECURSION_DEPTH && option.is_some() {
+                let (attenuation, scattered) = option.unwrap();
+                vec3_to_color(color_to_vec3(self.trace_ray(&scattered, recursion_depth+1)).mul_element_wise(attenuation))
+            } else {
+                Color{r: 0, g: 0, b: 0, a: 0}
+            }
         } else {
-            return background_color(ray);
+            background_color(ray)
         }
     }
 
-    pub fn intersect_world(&self, ray: &Ray, min_dist: f32, max_dist: f32, hit_record: &mut HitRecord) -> bool {
+    pub fn intersect_world<'a, 'b>(&'a self, ray: &Ray, min_dist: f32, max_dist: f32, hit_record: &'b mut HitRecord<'a>) -> bool {
         let mut intersected_anything = false;
         let mut closest_hit = max_dist;
 
-        for object in &self.world.objects {
+        for object in &self.world {
             match &object.shape {
                 Shape::Sphere(sphere) => {
                     if ray_to_sphere(ray, &sphere, min_dist, closest_hit, hit_record) {
                         closest_hit = hit_record.t;
+                        hit_record.material = Some(&object.material);
 
                         intersected_anything = true;
                     }
@@ -160,6 +156,29 @@ impl Raytracer {
     }
 }
 
+// @returns Option<(attenuation: Vec3, scattered_ray: Ray)>
+fn scatter_from_material(ray_in: &Ray, material: &Material, hit_record: &HitRecord) -> Option<(Vec3, Ray)> {
+    match material {
+        Material::Diffuse(diffuse_material) => {
+            let target = hit_record.point + hit_record.normal + random_in_unit_sphere();
+            let scattered = Ray::new(hit_record.point, target - hit_record.point);
+            let attenuation = diffuse_material.albedo;
+
+            Some( (attenuation, scattered) )
+        },
+        Material::Metalic(metalic_material) => {
+            let reflected = reflect(ray_in.direction.normalize(), hit_record.normal);
+            let scattered = Ray::new(hit_record.point, reflected);
+            let attenuation = metalic_material.albedo;
+
+            if scattered.direction.dot(hit_record.normal) > 0.0 {
+                Some( (attenuation, scattered) )
+            } else {
+                None
+            }
+        }
+    }
+}
 
 fn background_color(ray: &Ray) -> Color {
     let normalized_dir = ray.direction.normalize();
@@ -206,8 +225,11 @@ fn main() -> Result<(), String>{
     println!("Hello, world!");
 
     let mut raytracer = Raytracer::new(WINDOW_WIDTH, WINDOW_HEIGHT);
-    raytracer.world.objects.push(Object{material: Material::Diffuse(DiffuseMaterial{}), shape: Shape::Sphere(Sphere{center: Vec3::new(0.0, 0.0, -1.0), radius: 0.5})});
-    raytracer.world.objects.push(Object{material: Material::Diffuse(DiffuseMaterial{}), shape: Shape::Sphere(Sphere{center: Vec3::new(0.0, -100.5, -1.0), radius: 100.0})});
+    raytracer.world.push(Object{material: Material::Diffuse(DiffuseMaterial{albedo: Vec3::new(0.5, 0.5, 0.0)}), shape: Shape::Sphere(Sphere{center: Vec3::new(0.0, 0.0, -1.0), radius: 0.5})});
+    raytracer.world.push(Object{material: Material::Diffuse(DiffuseMaterial{albedo: Vec3::new(0.0, 0.5, 0.5)}), shape: Shape::Sphere(Sphere{center: Vec3::new(0.0, -100.5, -1.0), radius: 100.0})});
+    raytracer.world.push(Object{material: Material::Metalic(MetalicMaterial{albedo: Vec3::new(0.8, 0.6, 0.2), fuzz: 0.3}), shape: Shape::Sphere(Sphere{center: Vec3::new(1.0, 0.0, -1.0), radius: 0.5})});
+    raytracer.world.push(Object{material: Material::Metalic(MetalicMaterial{albedo: Vec3::new(0.8, 0.8, 0.8), fuzz: 1.0}), shape: Shape::Sphere(Sphere{center: Vec3::new(-1.0, 0.0, -1.0), radius: 0.5})});
+
 
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
