@@ -1,5 +1,5 @@
 #Add external library directory to the linker
 $ENV:LIB="external"
 
-cargo +nightly run
+cargo +nightly run --release
 pause
