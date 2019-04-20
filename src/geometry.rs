@@ -11,9 +11,14 @@ pub struct MetalicMaterial {
     //Size of 3*4+1*3 = 16 bytes
 }
 
+pub struct DielectricMaterial {
+    pub refraction_index: f32,
+}
+
 pub enum Material {
     Diffuse(DiffuseMaterial),
     Metalic(MetalicMaterial),
+    Dielectric(DielectricMaterial),
 }
 
 pub struct Sphere {

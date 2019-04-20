@@ -42,6 +42,24 @@ fn reflect(direction: Vec3, surface_normal: Vec3) -> Vec3 {
     return surface_normal - 2.0*direction.dot(surface_normal)*surface_normal;
 }
 
+fn refract(direction: Vec3, normal: Vec3, ni_over_nt: f32) -> Option<Vec3> {
+    let uv = direction.normalize();
+    let dt = uv.dot(normal);
+    let discriminant = 1.0 - ni_over_nt*ni_over_nt*(1.0-dt*dt);
+    if discriminant > 0.0 {
+        let refracted = ni_over_nt*(uv-normal*dt)-normal*discriminant.sqrt();
+        Some(refracted)
+    } else {
+        None
+    }
+}
+
+fn schlick(cosine: f32, refraction_index: f32) -> f32 {
+    let mut r0 = (1.0-refraction_index) / (1.0+refraction_index);
+    r0 = r0 * r0;
+    r0 + (1.0-r0)*(1.0-cosine).powf(5.0)
+}
+
 struct HitRecord<'a> {
     t: f32,
     point: Vec3,
@@ -168,7 +186,7 @@ fn scatter_from_material(ray_in: &Ray, material: &Material, hit_record: &HitReco
         },
         Material::Metalic(metalic_material) => {
             let reflected = reflect(ray_in.direction.normalize(), hit_record.normal);
-            let scattered = Ray::new(hit_record.point, reflected);
+            let scattered = Ray::new(hit_record.point, reflected + metalic_material.fuzz*random_in_unit_sphere());
             let attenuation = metalic_material.albedo;
 
             if scattered.direction.dot(hit_record.normal) > 0.0 {
@@ -176,6 +194,43 @@ fn scatter_from_material(ray_in: &Ray, material: &Material, hit_record: &HitReco
             } else {
                 None
             }
+        },
+        Material::Dielectric(dielectric_material) => {
+            let outward_normal;
+            let ni_over_nt;
+            let reflected = reflect(ray_in.direction, hit_record.normal);
+            let attenuation = Vec3::new(1.0, 1.0, 1.0);
+            let reflect_probability;
+            let cosine;
+            if ray_in.direction.dot(hit_record.normal) > 0.0 {
+                outward_normal = -hit_record.normal;
+                ni_over_nt = dielectric_material.refraction_index;
+                cosine = dielectric_material.refraction_index * ray_in.direction.dot(hit_record.normal) / ray_in.direction.magnitude();
+            } else {
+                outward_normal = hit_record.normal;
+                ni_over_nt = 1.0 / dielectric_material.refraction_index;
+                cosine = -ray_in.direction.dot(hit_record.normal) / ray_in.direction.magnitude();
+            }
+
+            let mut refracted_direction = Vec3::new(0.0, 0.0, 0.0);
+            let mut scattered;
+            match refract(ray_in.direction, outward_normal, ni_over_nt) {
+                Some(refracted) => { 
+                    refracted_direction = refracted;
+                    reflect_probability = schlick(cosine, dielectric_material.refraction_index); 
+                    },
+                None => {
+                    reflect_probability = 1.0;
+                },
+            }
+
+            if rand::random::<f32>() < reflect_probability {
+                scattered = Ray::new(hit_record.point, reflected);
+            } else {
+                scattered = Ray::new(hit_record.point, refracted_direction);
+            }
+
+            Some( (attenuation, scattered) )
         }
     }
 }
@@ -226,9 +281,10 @@ fn main() -> Result<(), String>{
 
     let mut raytracer = Raytracer::new(WINDOW_WIDTH, WINDOW_HEIGHT);
     raytracer.world.push(Object{material: Material::Diffuse(DiffuseMaterial{albedo: Vec3::new(0.5, 0.5, 0.0)}), shape: Shape::Sphere(Sphere{center: Vec3::new(0.0, 0.0, -1.0), radius: 0.5})});
-    raytracer.world.push(Object{material: Material::Diffuse(DiffuseMaterial{albedo: Vec3::new(0.0, 0.5, 0.5)}), shape: Shape::Sphere(Sphere{center: Vec3::new(0.0, -100.5, -1.0), radius: 100.0})});
-    raytracer.world.push(Object{material: Material::Metalic(MetalicMaterial{albedo: Vec3::new(0.8, 0.6, 0.2), fuzz: 0.3}), shape: Shape::Sphere(Sphere{center: Vec3::new(1.0, 0.0, -1.0), radius: 0.5})});
-    raytracer.world.push(Object{material: Material::Metalic(MetalicMaterial{albedo: Vec3::new(0.8, 0.8, 0.8), fuzz: 1.0}), shape: Shape::Sphere(Sphere{center: Vec3::new(-1.0, 0.0, -1.0), radius: 0.5})});
+    raytracer.world.push(Object{material: Material::Diffuse(DiffuseMaterial{albedo: Vec3::new(0.0, 0.8, 0.5)}), shape: Shape::Sphere(Sphere{center: Vec3::new(0.0, -100.5, -1.0), radius: 100.0})});
+    raytracer.world.push(Object{material: Material::Metalic(MetalicMaterial{albedo: Vec3::new(0.8, 0.6, 0.2), fuzz: 0.2}), shape: Shape::Sphere(Sphere{center: Vec3::new(1.0, 0.0, -1.0), radius: 0.5})});
+    raytracer.world.push(Object{material: Material::Dielectric(DielectricMaterial{refraction_index: 1.5}), shape: Shape::Sphere(Sphere{center: Vec3::new(-1.0, 0.0, -1.0), radius: 0.5})});
+    raytracer.world.push(Object{material: Material::Dielectric(DielectricMaterial{refraction_index: 1.5}), shape: Shape::Sphere(Sphere{center: Vec3::new(-1.0, 0.0, -1.0), radius: -0.45})});
 
 
     let sdl_context = sdl2::init().unwrap();
