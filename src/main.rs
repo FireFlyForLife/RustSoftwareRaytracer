@@ -293,12 +293,17 @@ fn ray_to_sphere(ray: &Ray, sphere: &Sphere, t_min: f32, t_max: f32, hit_record:
     return false;
 }
 
+
+fn make_camera_rotation(yaw: f32, pitch: f32) -> Quat {
+    Quat::from(Euler::new(Rad(pitch), Rad(yaw), Rad(0.0)))
+}
+
 //TODO: Put this functionality in the Camera struct
 fn make_camera(yaw: f32, pitch: f32, origin: Vec3) -> Camera {
-    let rotator = Quat::from(Euler::new(Rad(pitch), Rad(yaw), Rad(0.0)));
-    let dir = rotator * Vec3::unit_x();
+    let rotator = make_camera_rotation(yaw, pitch);
+    let dir = rotator * Vec3::unit_z();
 
-    Camera::new(origin, dir, Vec3::unit_y(), WINDOW_WIDTH, WINDOW_HEIGHT, 90.0)
+    Camera::new(origin, origin + dir, Vec3::unit_y(), WINDOW_WIDTH, WINDOW_HEIGHT, 90.0)
 }
 
 fn main() -> Result<(), String>{
@@ -349,15 +354,15 @@ fn main() -> Result<(), String>{
                     Event::KeyDown { keycode: Some(key), .. } => {
                         camera_moved_this_frame = true;
                         match key {
-                            Keycode::A => {camera_pos += Quat::from(Euler{x: Rad(camera_pitch), y: Rad(camera_yaw), z: Rad(0.0)}) * Vec3::new(-1.0, 0.0, 0.0)},
-                            Keycode::D => {camera_pos += Quat::from(Euler{x: Rad(camera_pitch), y: Rad(camera_yaw), z: Rad(0.0)}) * Vec3::new(1.0, 0.0, 0.0)},
-                            Keycode::W => {camera_pos += Quat::from(Euler{x: Rad(camera_pitch), y: Rad(camera_yaw), z: Rad(0.0)}) * Vec3::new(0.0, 0.0, 1.0)},
-                            Keycode::S => {camera_pos += Quat::from(Euler{x: Rad(camera_pitch), y: Rad(camera_yaw), z: Rad(0.0)}) * Vec3::new(1.0, 0.0, -1.0)},
+                            Keycode::A => {camera_pos += make_camera_rotation(camera_yaw, camera_pitch) * Vec3::new(-1.0, 0.0, 0.0) * 0.1},
+                            Keycode::D => {camera_pos += make_camera_rotation(camera_yaw, camera_pitch) * Vec3::new(1.0, 0.0, 0.0) * 0.1},
+                            Keycode::W => {camera_pos += make_camera_rotation(camera_yaw, camera_pitch) * Vec3::new(0.0, 0.0, 1.0) * 0.1},
+                            Keycode::S => {camera_pos += make_camera_rotation(camera_yaw, camera_pitch) * Vec3::new(1.0, 0.0, -1.0) * 0.1},
 
-                            Keycode::Left => {camera_yaw += -0.2},
-                            Keycode::Right => {camera_yaw += 0.2},
-                            Keycode::Up => {camera_pitch += 0.2},
-                            Keycode::Down => {camera_pitch += -0.2},
+                            Keycode::Left => {camera_yaw += -0.1},
+                            Keycode::Right => {camera_yaw += 0.1},
+                            Keycode::Up => {camera_pitch += 0.1},
+                            Keycode::Down => {camera_pitch += -0.1},
                             _ => {},
                         }
                         camera = make_camera(camera_yaw, camera_pitch, camera_pos);
