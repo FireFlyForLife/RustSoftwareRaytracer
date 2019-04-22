@@ -318,8 +318,8 @@ fn main() -> Result<(), String>{
 
     //Vec3::new(-2.0, 2.0, 1.0), Vec3::new(0.0, 0.0, -1.0)
     let mut camera_pos = Vec3::new(-2.0, 2.0, 1.0);
-    let mut camera_yaw: f32 = 0.0;
-    let mut camera_pitch: f32 = 1.0;
+    let mut camera_yaw: f32 = 2.5;
+    let mut camera_pitch: f32 = -1.0;
     let mut camera_moved_this_frame = false;
     let mut camera = make_camera(camera_yaw, camera_pitch, camera_pos);
 
