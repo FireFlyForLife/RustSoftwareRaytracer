@@ -11,6 +11,7 @@ use geometry::*;
 use camera::Camera;
 
 use cgmath::prelude::*;
+use cgmath::{Rad, Euler};
 
 use sdl2::pixels::Color;
 use sdl2::event::Event;
@@ -292,6 +293,13 @@ fn ray_to_sphere(ray: &Ray, sphere: &Sphere, t_min: f32, t_max: f32, hit_record:
     return false;
 }
 
+//TODO: Put this functionality in the Camera struct
+fn make_camera(yaw: f32, pitch: f32, origin: Vec3) -> Camera {
+    let rotator = Quat::from(Euler::new(Rad(pitch), Rad(yaw), Rad(0.0)));
+    let dir = rotator * Vec3::unit_x();
+
+    Camera::new(origin, dir, Vec3::unit_y(), WINDOW_WIDTH, WINDOW_HEIGHT, 90.0)
+}
 
 fn main() -> Result<(), String>{
     println!("Hello, world!");
@@ -303,7 +311,12 @@ fn main() -> Result<(), String>{
     raytracer.world.push(Object{material: Material::Dielectric(DielectricMaterial{refraction_index: 1.5}), shape: Shape::Sphere(Sphere{center: Vec3::new(-1.0, 0.0, -1.0), radius: 0.5})});
     raytracer.world.push(Object{material: Material::Dielectric(DielectricMaterial{refraction_index: 1.5}), shape: Shape::Sphere(Sphere{center: Vec3::new(-1.0, 0.0, -1.0), radius: -0.45})});
 
-    let camera = Camera::new(Vec3::new(-2.0, 2.0, 1.0), Vec3::new(0.0, 0.0, -1.0), Vec3::unit_y(), WINDOW_WIDTH, WINDOW_HEIGHT, 90.0);
+    //Vec3::new(-2.0, 2.0, 1.0), Vec3::new(0.0, 0.0, -1.0)
+    let mut camera_pos = Vec3::new(-2.0, 2.0, 1.0);
+    let mut camera_yaw: f32 = 0.0;
+    let mut camera_pitch: f32 = 1.0;
+    let mut camera_moved_this_frame = false;
+    let mut camera = make_camera(camera_yaw, camera_pitch, camera_pos);
 
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
@@ -333,9 +346,22 @@ fn main() -> Result<(), String>{
                     Event::Quit {..} | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
                         break 'running
                     },
-                    // Event::KeyDown { keycode: Some(Keycode::Space), repeat: false, .. } => {
-                    //     game.toggle_state();
-                    // },
+                    Event::KeyDown { keycode: Some(key), .. } => {
+                        camera_moved_this_frame = true;
+                        match key {
+                            Keycode::A => {camera_pos += Quat::from(Euler{x: Rad(camera_pitch), y: Rad(camera_yaw), z: Rad(0.0)}) * Vec3::new(-1.0, 0.0, 0.0)},
+                            Keycode::D => {camera_pos += Quat::from(Euler{x: Rad(camera_pitch), y: Rad(camera_yaw), z: Rad(0.0)}) * Vec3::new(1.0, 0.0, 0.0)},
+                            Keycode::W => {camera_pos += Quat::from(Euler{x: Rad(camera_pitch), y: Rad(camera_yaw), z: Rad(0.0)}) * Vec3::new(0.0, 0.0, 1.0)},
+                            Keycode::S => {camera_pos += Quat::from(Euler{x: Rad(camera_pitch), y: Rad(camera_yaw), z: Rad(0.0)}) * Vec3::new(1.0, 0.0, -1.0)},
+
+                            Keycode::Left => {camera_yaw += -0.2},
+                            Keycode::Right => {camera_yaw += 0.2},
+                            Keycode::Up => {camera_pitch += 0.2},
+                            Keycode::Down => {camera_pitch += -0.2},
+                            _ => {},
+                        }
+                        camera = make_camera(camera_yaw, camera_pitch, camera_pos);
+                    },
                     // Event::MouseButtonDown { x, y, mouse_btn: MouseButton::Left, .. } => {
                     //     let x = (x as u32) / SQUARE_SIZE;
                     //     let y = (y as u32) / SQUARE_SIZE;
@@ -348,6 +374,14 @@ fn main() -> Result<(), String>{
                 }
             }
         }
+        if camera_moved_this_frame {
+            for pixel in &mut back_buffer {
+                pixel.color = Vec3::new(0.0, 0.0, 0.0);
+                pixel.amount = 0.0;
+            }
+            camera_moved_this_frame = false;
+        }
+
         println!("frame {} event loop took: {} sec", frame, frame_start_time.elapsed().as_secs_f64());
         
         let start_render_time = Instant::now();

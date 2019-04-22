@@ -1,4 +1,4 @@
-use cgmath::{Vector2, Vector3, Vector4};
+use cgmath::{Vector2, Vector3, Vector4, Quaternion};
 use sdl2::pixels::Color;
 
 pub type Vec2 = Vector2<f32>;
@@ -8,6 +8,8 @@ pub type Vec4 = Vector4<f32>;
 pub type IVec2 = Vector2<i32>;
 pub type IVec3 = Vector3<i32>;
 pub type IVec4 = Vector4<i32>;
+
+pub type Quat = Quaternion<f32>;
 
 // Create a RGBA color value from a 3 component vector, and fill make the alpha channel 255
 pub fn vec3_to_color(vec: Vec3) -> Color {
