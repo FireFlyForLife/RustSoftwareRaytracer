@@ -21,7 +21,7 @@ use std::vec::Vec;
 use std::ptr;
 use std::mem;
 
-const SAMPLES_PER_PIXEL: u32 = 32;
+const SAMPLES_PER_PIXEL: u32 = 1;
 const MAX_RAY_RECURSION_DEPTH: u32 = 50;
 const WINDOW_WIDTH: u32 = 640; //1280;
 const WINDOW_HEIGHT: u32 = 480; //720;
@@ -81,6 +81,23 @@ struct Raytracer {
     aspect_ratio: f32,
 }
 
+struct TotalPixel {
+    color: Vec3,
+    amount: f32,
+}
+impl Copy for TotalPixel { }
+impl Clone for TotalPixel {
+    fn clone(&self) -> TotalPixel {
+        TotalPixel{color: self.color, amount: self.amount}
+    }
+}
+impl Default for TotalPixel {
+    fn default() -> TotalPixel {        
+        TotalPixel{color: Vec3::new(0.0, 0.0, 0.0), amount: 0.0}
+    }
+}
+
+
 impl Raytracer {
     pub fn new(width: u32, height: u32) -> Raytracer {
         let aspect_ratio = width as f32 / height as f32;
@@ -93,47 +110,25 @@ impl Raytracer {
         }
     }
 
-    pub fn draw_frame(&self, pixels: &mut [u8]) {
-        let aspect_ratio = self.width as f32 / self.height as f32;
-        let lower_left_corner = Vec3::new(-1.0 * aspect_ratio, -1.0, -1.0);
-        let horizontal = Vec3::new(2.0, 0.0, 0.0) * aspect_ratio;
-        let vertical = Vec3::new(0.0, 2.0, 0.0);
-
-        let pixels_color_ptr: *mut Color = unsafe{ mem::transmute( &pixels[0] ) };
-
-        let origin = Vec3::new(0.0, 0.0, 0.0);
-
+    pub fn draw_frame(&self, camera: &Camera, pixels: &mut [TotalPixel]) {
         for y in 0..self.height {
             for x in 0..self.width {
-                let mut total_color = Vec3::new(0.0, 0.0, 0.0);
+                let pixel: &mut TotalPixel = &mut pixels[(x + y*self.width) as usize];
                 for _sample in 0..SAMPLES_PER_PIXEL {
                     let u = ((x as f32) + rand::random::<f32>()) / (self.width as f32);
                     let v = 1.0 - ((y as f32) + rand::random::<f32>()) / (self.height as f32);
-                    let ray = Ray::new(origin, lower_left_corner + u*horizontal + v*vertical);
+                    let ray = camera.get_ray(u, v);
 
                     let color = self.trace_ray(&ray, 0);
 
-                    total_color += color_to_vec3(color);
-                }
-                
-                let vec3_color = total_color / (SAMPLES_PER_PIXEL as f32);
-                let color;
-                if USE_GAMMA_CORRECTION {
-                    let vec3_color_gamma_corrected = Vec3::new(vec3_color.x.sqrt(), vec3_color.y.sqrt(), vec3_color.z.sqrt());
-                    color = vec3_to_color(vec3_color_gamma_corrected);
-                } else {
-                   color = vec3_to_color(vec3_color);
-                }
-                
-                let fixed_color = Color{r: color.b, g: color.g, b: color.r, a: color.a};
-                unsafe{
-                    ptr::write::<Color>(pixels_color_ptr.offset((y * self.width + x) as isize), fixed_color);
+                    pixel.color += color;
+                    pixel.amount += 1.0;
                 }
             }
         }
     }
 
-    pub fn trace_ray(&self, ray: &Ray, recursion_depth: u32) -> Color {
+    pub fn trace_ray(&self, ray: &Ray, recursion_depth: u32) -> Vec3 {
         let mut hit_record: HitRecord = Default::default();
 
         if self.intersect_world(ray, 0.001, std::f32::MAX, &mut hit_record) {
@@ -143,9 +138,9 @@ impl Raytracer {
             let option = scatter_from_material(ray, hit_record.material.unwrap(), &hit_record);
             if recursion_depth < MAX_RAY_RECURSION_DEPTH && option.is_some() {
                 let (attenuation, scattered) = option.unwrap();
-                vec3_to_color(color_to_vec3(self.trace_ray(&scattered, recursion_depth+1)).mul_element_wise(attenuation))
+                self.trace_ray(&scattered, recursion_depth+1).mul_element_wise(attenuation)
             } else {
-                Color{r: 0, g: 0, b: 0, a: 0}
+                Vec3{x: 0.0, y: 0.0, z: 0.0}
             }
         } else {
             background_color(ray)
@@ -171,6 +166,28 @@ impl Raytracer {
         }
 
         return intersected_anything;
+    }
+}
+
+fn present_to_window(back_buffer: &[TotalPixel], front_buffer: &mut [u8]) {
+    assert!(back_buffer.len() == front_buffer.len()/4);
+    let buffer_len = back_buffer.len();
+
+    let front_buffer_ptr: *mut Color = unsafe{ mem::transmute( &front_buffer[0] ) };
+
+    for pixelIndex in 0..buffer_len {
+        let total_pixel = back_buffer[pixelIndex];
+        let mut average_pixel = total_pixel.color / total_pixel.amount;
+
+        if USE_GAMMA_CORRECTION {
+            average_pixel.x = average_pixel.x.sqrt();
+            average_pixel.y = average_pixel.y.sqrt();
+            average_pixel.z = average_pixel.z.sqrt();
+        }
+
+        //The backbuffer format is BGRA so we swap the x and z channels here
+        let color = Color{r: (average_pixel.z * 255.0) as u8, g: (average_pixel.y * 255.0) as u8, b: (average_pixel.x * 255.0) as u8, a: 255u8};
+        unsafe{ ptr::write(front_buffer_ptr.offset(pixelIndex as isize), color); }
     }
 }
 
@@ -235,12 +252,12 @@ fn scatter_from_material(ray_in: &Ray, material: &Material, hit_record: &HitReco
     }
 }
 
-fn background_color(ray: &Ray) -> Color {
+fn background_color(ray: &Ray) -> Vec3 {
     let normalized_dir = ray.direction.normalize();
     let t = 0.5*(normalized_dir.y + 1.0);
     let color = (1.0-t)*Vec3::new(1.0, 1.0, 1.0) + t*Vec3::new(0.5, 0.7, 1.0);
     
-    vec3_to_color(color)
+    color
 }
 
 fn ray_to_sphere(ray: &Ray, sphere: &Sphere, t_min: f32, t_max: f32, hit_record: &mut HitRecord) -> bool {
@@ -286,6 +303,7 @@ fn main() -> Result<(), String>{
     raytracer.world.push(Object{material: Material::Dielectric(DielectricMaterial{refraction_index: 1.5}), shape: Shape::Sphere(Sphere{center: Vec3::new(-1.0, 0.0, -1.0), radius: 0.5})});
     raytracer.world.push(Object{material: Material::Dielectric(DielectricMaterial{refraction_index: 1.5}), shape: Shape::Sphere(Sphere{center: Vec3::new(-1.0, 0.0, -1.0), radius: -0.45})});
 
+    let camera = Camera::new(Vec3::new(0.0, 0.0, 0.0), WINDOW_WIDTH, WINDOW_HEIGHT);
 
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
@@ -298,6 +316,10 @@ fn main() -> Result<(), String>{
         .position_centered()
         .build()
         .map_err(|e| e.to_string()).unwrap();
+
+    let back_buffer_size: usize = (WINDOW_WIDTH * WINDOW_HEIGHT) as usize;
+    let mut back_buffer: Vec<TotalPixel> = Vec::with_capacity(back_buffer_size);
+    back_buffer.resize(back_buffer_size, Default::default());
 
     let mut frame : u32 = 0;
     let mut frame_start_time;
@@ -336,8 +358,12 @@ fn main() -> Result<(), String>{
         if !surface.must_lock() {
             let pixels = surface.without_lock_mut().unwrap();
             let drawing_start_time = Instant::now();
-            raytracer.draw_frame(pixels);
+            raytracer.draw_frame(&camera, &mut back_buffer);
             println!("frame {} raycast drawing time: {} sec", frame, drawing_start_time.elapsed().as_secs_f64());
+
+            let copy_backbuffer_start_time = Instant::now();
+            present_to_window(&back_buffer, pixels);
+            println!("frame {}, copy backbuffer to frontbuffer took: {} sec", frame, copy_backbuffer_start_time.elapsed().as_secs_f64());
         }
 
         let present_time_start = Instant::now();
