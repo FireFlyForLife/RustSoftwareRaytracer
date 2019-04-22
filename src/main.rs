@@ -303,7 +303,7 @@ fn main() -> Result<(), String>{
     raytracer.world.push(Object{material: Material::Dielectric(DielectricMaterial{refraction_index: 1.5}), shape: Shape::Sphere(Sphere{center: Vec3::new(-1.0, 0.0, -1.0), radius: 0.5})});
     raytracer.world.push(Object{material: Material::Dielectric(DielectricMaterial{refraction_index: 1.5}), shape: Shape::Sphere(Sphere{center: Vec3::new(-1.0, 0.0, -1.0), radius: -0.45})});
 
-    let camera = Camera::new(Vec3::new(0.0, 0.0, 0.0), WINDOW_WIDTH, WINDOW_HEIGHT);
+    let camera = Camera::new(Vec3::new(-2.0, 2.0, 1.0), Vec3::new(0.0, 0.0, -1.0), Vec3::unit_y(), WINDOW_WIDTH, WINDOW_HEIGHT, 90.0);
 
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
