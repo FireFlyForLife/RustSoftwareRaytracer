@@ -1,6 +1,8 @@
 # RustSoftwareRaytracer
 A software raytracer written in rust
 
+![Raytracer screenshot](https://github.com/FireFlyForLife/RustSoftwareRaytracer/blob/master/screenshot.png)
+
 ## Building
 I use rust-SDL2, so you have to add the library directory `external` to your LIB environment variable. The commands are also put in `BuildProject.ps1` and `BuildProject.cmd`.
 
